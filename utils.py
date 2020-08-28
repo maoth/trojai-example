@@ -101,14 +101,3 @@ def mad_detection(l1_norm_list, crosp_lb):
 
 
 
-
-
-
-
-
-
-
-
-
-
-

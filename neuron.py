@@ -13,11 +13,12 @@ import multiprocessing as MP
 
 
 CONSIDER_LAYER_TYPE = ['Conv2d', 'Linear']
-BATCH_SIZE = 64
+
+BATCH_SIZE = 2
 NUM_WORKERS = BATCH_SIZE
 EPS = 1e-3
 TURNPOINT_TEST_LIMIT=200
-NUM_SELECTED_NEURONS=1000
+NUM_SELECTED_NEURONS=10
 
 
 
@@ -63,7 +64,8 @@ class SingleNeuronAnalyzer:
 
         self.turn_x = list()
         self.turn_y = list()
-
+    #x_list y_list 是在探测过程中找过的点
+    #y_list[0] 是一个二元向量 第一个元素 是index 第二元素是y的值
     def _f(self, k, x):
         self.x_list.append(x)
         self.pipe.send((k, self.n_idx, x))
@@ -94,28 +96,6 @@ class SingleNeuronAnalyzer:
                 return False
         return True
 
-
-    def find_lowerest_turn(self, l_x, l_y, r_x, r_y):
-        if r_x < l_x+EPS:
-            return l_x, l_y
-
-        lx, ly = l_x, l_y
-        rx, ry = r_x, r_y
-        while lx+EPS < rx:
-            dd = rx-lx;
-            p1_x = lx+dd*1.0/3.0
-            p1_y = self._f(p1_x)
-            p2_x = lx+dd*2.0/3.0
-            p2_y = self._f(p2_x)
-
-
-            if self._3p_inline([lx,p1_x,p2_x],[ly,p1_y,p2_y]):
-                lx, ly = p2_x, p2_y
-            elif self._3p_inline([p1_x,p2_x,rx],[p1_y,p2_y,ry]):
-                rx, ry = p1_x, p1_y
-            else:
-                rx, ry = p2_x, p2_y
-        return rx, ry
 
 
     def find_bound(self, init_x, init_y, init_delta):
@@ -159,18 +139,9 @@ class SingleNeuronAnalyzer:
         return ck_list_x[0], ck_list_y[0]
 
 
-    def _deal_interval(self, lx, ly, rx, ry):
-        if (rx-lx < 0.1):
-            return
 
-        mx = (lx+rx)/2.0
-        my = self._f(mx)
-        if self._3p_inline([lx,mx,rx],[ly,my,ry]):
-            return
-        self._deal_interval(lx,ly,mx,my)
-        self._deal_interval(mx,my,rx,ry)
-
-
+    #从x_list[a,b,c] y_list[a,b,c]中判断是否三点在一条线，以及是否区间足够小，把满足的点放入int_list
+    #While后面在找拐点 threshold = 0.1, 找过的点不超过10000
     def search_trunpoints(self):
         #self._deal_interval(self.l_x, self.l_y, self.r_x, self.r_y)
         #return
@@ -329,7 +300,7 @@ class PredictingThread(threading.Thread):
 
 
 class NeuronAnalyzer:
-    def __init__(self, model, n_classes=5):
+    def __init__(self, model, n_classes):
         self.model = model
         self.model.eval()
 
@@ -356,7 +327,6 @@ class NeuronAnalyzer:
         self.data = dict()
         for tp in CONSIDER_LAYER_TYPE:
             self.data[tp] = self._build_dict()
-
         mds = list(model.modules())
         n_conv = 0
         for k, md in enumerate(mds):
@@ -375,7 +345,6 @@ class NeuronAnalyzer:
                 for w in md.parameters():
                     w_list.append(w.cpu().detach().numpy())
                 self.data[mdname]['weights'].append(w_list)
-
         '''
         self.results = list()
         self.manager = MP.Manager()
@@ -428,7 +397,6 @@ class NeuronAnalyzer:
             if k+1 == self.n_child:
                 x = torch.flatten(x,1)
             x = md(x)
-
         return x.cpu().detach().numpy()
     '''
 
@@ -571,7 +539,6 @@ class NeuronAnalyzer:
         n = data_dict['n']
         weights = data_dict['weights']
         outputs = data_dict['outputs']
-
         recs = []
         noms = []
         rsts = []
@@ -580,16 +547,13 @@ class NeuronAnalyzer:
             os = np.abs(os)
             tmp = np.max(os, axis=(2,3))
             recs.append(np.mean(tmp, axis=0))
-
             w = weights[i][0]
             sp = w.shape
             ts = []
             for j in range(sp[0]):
                 ts.append(LA.norm(w[j,:,:,:]))
             noms.append(np.asarray(ts))
-
             rsts.append(np.abs(recs[i]/noms[i]))
-
         zz = np.concatenate(rsts, axis=0)
         return zz
     '''
@@ -616,14 +580,14 @@ class NeuronAnalyzer:
                 feed_x.append(cp_base)
             feed_x = np.asarray(feed_x)
             x_tensor = torch.from_numpy(feed_x)
-            y = self.partial_model(x_tensor.cuda())
+            y = self.partial_model(x_tensor)
             return y.cpu().detach().numpy()
         return p_func
 
 
     def forward_from_partial(self, x):
         x_tensor = torch.from_numpy(x)
-        y = self.partial_model(x_tensor.cuda())
+        y = self.partial_model(x_tensor)
         return y.cpu().detach().numpy()
 
 
@@ -700,7 +664,7 @@ class NeuronAnalyzer:
         for step, data in enumerate(dataloader):
             imgs, lbs = data
             lbs = lbs.numpy().squeeze(axis=-1)
-            y_tensor = self.model(imgs.cuda())
+            y_tensor = self.model(imgs)
             logits = y_tensor.cpu().detach().numpy()
             pred = np.argmax(logits,axis=1)
 
@@ -858,8 +822,8 @@ class NeuronAnalyzer:
             if (vk1-vk2 > mxvl):
                 mxvl = vk1-vk2
                 mxid = k
-                print(z)
-                print(mxvl)
+                #print(z)
+                #print(mxvl)
 
         print(self.results[mxid])
         return mxvl

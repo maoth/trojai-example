@@ -5,9 +5,12 @@ From: pytorch/pytorch:latest
     ./trojan_detector.py /
     ./NC_pytorch.py /
     ./utils.py /
+    ./neuron.py /
 
 %post
     /opt/conda/bin/conda install -c conda-forge opencv
+    /opt/conda/bin/conda install scipy
+	
 
 %runscript
     exec python3 /trojan_detector.py "$@"

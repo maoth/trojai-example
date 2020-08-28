@@ -11,6 +11,7 @@ import random
 import torch
 import torchvision.models
 import warnings
+
 warnings.filterwarnings("ignore")
 
 from torch.utils.data import TensorDataset, DataLoader
@@ -28,6 +29,25 @@ def build_data_loader(X,Y, batch_size=2):
     loader = DataLoader(dataset,batch_size=batch_size,drop_last=False, shuffle=False)
     return loader
 
+def get_num_class(dir):
+    dirs = os.listdir(dir)
+    x = 0
+    temp = 0
+    for d in dirs:
+        interval = d[3:10]
+        
+        for i in range(len(interval)):
+            for j in range(len(interval) + 1, i, -1):
+                try:
+                    temp = int(interval[i:j])
+#                     print(i, j, interval[i:j])
+                    x = max(temp, x)
+                    break
+                except:
+                    pass
+        
+    return x+1
+
 
 def fake_trojan_detector(model_filepath, result_filepath, scratch_dirpath, examples_dirpath, example_img_format='png'):
 
@@ -39,79 +59,47 @@ def fake_trojan_detector(model_filepath, result_filepath, scratch_dirpath, examp
     cat_batch = utils.read_example_images(examples_dirpath, example_img_format)
 
 
-    num_classes=len(cat_batch)
+    num_classes=get_num_class(examples_dirpath)
     model = torch.load(model_filepath)
-    analyzer = NeuronAnalyzer(model, num_classes)
+    analyzer = NeuronAnalyzer(model,num_classes)
     all_x = np.concatenate([cat_batch[i]['images'] for i in range(num_classes)])
     all_y = np.concatenate([cat_batch[i]['labels'] for i in range(num_classes)])
+    #big_batch = np.concatenate(all_x, axis=0)
     dataloader = build_data_loader(all_x, all_y)
 
+    
+    # try:
+    #     print("sc begin")
+    #     sc = analyzer.analyse(dataloader)
+    #     print("sc end")
+    # except:
+    #     print("An exception occurred")
+    #     trojan_probability = 0.5
+    #     with open(result_filepath, 'a') as fh:   
+    #         fh.write("{}".format(trojan_probability))   
+    #         fh.write('\n')
+
+
+    print("sc begin")
     sc = analyzer.analyse(dataloader)
+    print("sc end")
+
 
     trojan_probability = np.min(sc)
     print('Trojan Probability: {}'.format(trojan_probability))
-    with open(result_filepath, 'w') as fh:
+    with open(result_filepath, 'a') as fh:
+        fh.write('\n')
+        fh.write("{}".format(model_filepath))
+        fh.write('\n')
         fh.write("{}".format(trojan_probability))
+        fh.write('\n')
+        fh.write('*********************')
+        fh.write('\n')
 
     model_name = model_filepath.split('/')[-2]
     np.save(os.path.join('output/', model_name), np.asarray(sc))
 
-    exit(0)
 
-
-    #visualizer = Visualizer(model, init_cost=1e-3, lr=0.1, \
-    #                        num_classes=num_classes, tmp_dir=scratch_dirpath)
-
-    rst_l1_norm = np.zeros((num_classes,num_classes))
-
-    all_x = [cat_batch[i] for i in range(num_classes)]
-    big_batch = np.concatenate(all_x, axis=0)
-
-    #for source_lb in range(num_classes):
-    source_lb = 0
-    for target_lb in range(num_classes):
-        #if target_lb==source_lb:
-        #  continue
-        pattern = np.random.random([3,224,224])*255.0
-        mask = np.random.random([224,224])
-        #dataloader = build_data_loader(cat_batch[source_lb])
-        dataloader = build_data_loader(big_batch)
-
-        visualize_start_time = time.time()
-
-        #pattern, mask, mask_upsample, logs = visualizer.visualize(dataloader, y_target=target_lb, pattern_init=pattern, mask_init=mask, max_steps=1000, num_batches_per_step=9)
-        #pattern, mask, mask_upsample, logs = visualizer.visualize(dataloader, y_target=target_lb, pattern_init=pattern, mask_init=mask, max_steps=1000, num_batches_per_step=16)
-
-        visualize_end_time = time.time()
-
-        # meta data about the generated mask
-        print('pattern, shape: %s, min: %f, max: %f' %
-              (str(pattern.shape), np.min(pattern), np.max(pattern)))
-        print('mask, shape: %s, min: %f, max: %f' %
-              (str(mask.shape), np.min(mask), np.max(mask)))
-        print('mask norm of %d to %d: %f' %
-              (source_lb, target_lb, np.sum(np.abs(mask_upsample))))
-
-        print('visualization cost %f seconds' %
-              (visualize_end_time - visualize_start_time))
-
-        #utils.save_pattern(pattern, mask_upsample, source_lb, target_lb, scratch_dirpath)
-
-        l1_norm = np.sum(np.abs(mask))
-        print('src: %d, tgt: %d, l1-norm: %f'%(source_lb,target_lb,l1_norm))
-        rst_l1_norm[source_lb][target_lb] = l1_norm
-
-    print(rst_l1_norm)
-    #model_name = model_filepath.split('/')[-2]
-    #np.save(os.path.join('output/', model_name), rst_l1_norm)
-
-
-    #trojan_probability = np.random.rand()
-    trojan_probability = 1-np.min(rst_l1_norm[0])/np.max(rst_l1_norm[0])
-    print('Trojan Probability: {}'.format(trojan_probability))
-
-    with open(result_filepath, 'w') as fh:
-        fh.write("{}".format(trojan_probability))
 
 
 if __name__ == "__main__":
